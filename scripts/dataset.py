@@ -5,7 +5,7 @@ from PIL import Image
 # import timm
 import numpy as np
 import matplotlib.pyplot as plt
-from textwrap import fill
+import pandas as pd
 # from transformers import AutoTokenizer
 
 
@@ -18,12 +18,13 @@ class MultimodalDataset(Dataset):
         self.transforms = transforms
 
     def __len__(self):
-        return len(self.df)
+        return len(self.dish)
 
     def __getitem__(self, idx):
         total_mass = self.dish.loc[idx, "total_mass"]
         total_calories = self.dish.loc[idx, "total_calories"]
         ingredients = [self.ingredients.loc[self.ingredients["id"] == int(item.split("_")[1]), "ingr"].iloc[0] for item in self.dish.loc[idx, "ingredients"].split(';')]
+        split = self.dish.loc[idx, "split"]
         image = Image.open(f"data/images/{self.dish.loc[idx, "dish_id"]}/rgb.png").convert('RGB')
         if (self.transforms != None):
             image = self.transforms(image=np.array(image))["image"]
@@ -32,7 +33,7 @@ class MultimodalDataset(Dataset):
         # image = Image.open(f"data/images/{img_path}").convert('RGB')
         # image = self.transforms(image=np.array(image))["image"]
 
-        return {"total_mass": total_mass, "total_calories": total_calories, "ingredients": ingredients, "image": image }
+        return {"total_mass": total_mass, "total_calories": total_calories, "ingredients": ingredients, "image": image, "split": split }
 
 def collate_fn(batch):
     print(batch)
@@ -73,3 +74,9 @@ def draw_item(item):
 
     plt.tight_layout()
     plt.show()
+
+def get_data(path):
+    dish = pd.read_csv("data/dish.csv")
+    train_data = dish[dish["split"] == "train"].reset_index(drop=True)
+    test_data = dish[dish["split"] == "test"].reset_index(drop=True)
+    return train_data, test_data
