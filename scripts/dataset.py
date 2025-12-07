@@ -2,21 +2,22 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
-# import timm
+import timm
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-# from transformers import AutoTokenizer
-
+from transformers import AutoTokenizer, BertTokenizerFast
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 
 class MultimodalDataset(Dataset):
-    def __init__(self, dish, ingredients, text_model, image_model, transforms):
+    def __init__(self, dish, ingredients, text_model=None, image_model=None, transforms=None):
         self.dish = dish
         self.ingredients = ingredients
-        # self.image_cfg = timm.get_pretrained_cfg(image_model)
-        # self.tokenizer = AutoTokenizer.from_pretrained(text_model)
         self.transforms = transforms
-
+        if (text_model != None and image_model != None):
+            self.image_cfg = timm.get_pretrained_cfg(image_model)
+            self.tokenizer = AutoTokenizer.from_pretrained(text_model)
     def __len__(self):
         return len(self.dish)
 
@@ -24,29 +25,34 @@ class MultimodalDataset(Dataset):
         total_mass = self.dish.loc[idx, "total_mass"]
         total_calories = self.dish.loc[idx, "total_calories"]
         ingredients = [self.ingredients.loc[self.ingredients["id"] == int(item.split("_")[1]), "ingr"].iloc[0] for item in self.dish.loc[idx, "ingredients"].split(';')]
-        split = self.dish.loc[idx, "split"]
         image = Image.open(f"data/images/{self.dish.loc[idx, "dish_id"]}/rgb.png").convert('RGB')
         if (self.transforms != None):
             image = self.transforms(image=np.array(image))["image"]
-        # label = self.df.loc[idx, "label"]
-        # img_path = self.df.loc[idx, "image_path"]
-        # image = Image.open(f"data/images/{img_path}").convert('RGB')
-        # image = self.transforms(image=np.array(image))["image"]
 
-        return {"total_mass": total_mass, "total_calories": total_calories, "ingredients": ingredients, "image": image, "split": split }
+        return {"total_mass": total_mass, "total_calories": total_calories, "ingredients": ingredients, "image": image }
+
+tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
 
 def collate_fn(batch):
-    print(batch)
-    texts = [item["text"] for item in batch]
+    total_mass = torch.tensor([item["total_mass"] for item in batch], dtype=torch.float32)
+    ingredients = ["; ".join(item["ingredients"]) for item in batch]
     images = torch.stack([item["image"] for item in batch])
-    labels = torch.LongTensor([item["label"] for item in batch])
+    total_calories = torch.tensor([item["total_calories"] for item in batch], dtype=torch.float32)
 
-    tokenized_input = {"input_ids": []}
+    tokenized = tokenizer(
+        ingredients,
+        return_tensors="pt",
+        padding="max_length",
+        truncation=True,
+        max_length=64
+    )
+
     return {
-        "label": labels,
+        "total_mass": total_mass,
+        "total_calories": total_calories,
         "image": images,
-        "input_ids": tokenized_input["input_ids"],
-        "attention_mask": tokenized_input["attention_mask"]
+        "input_ids": tokenized["input_ids"],
+        "attention_mask": tokenized["attention_mask"]
     }
 
 def draw_item(item):
@@ -80,3 +86,43 @@ def get_data(path):
     train_data = dish[dish["split"] == "train"].reset_index(drop=True)
     test_data = dish[dish["split"] == "test"].reset_index(drop=True)
     return train_data, test_data
+
+
+IMG_SIZE = 224
+
+train_transforms = A.Compose([
+    A.LongestMaxSize(max_size=IMG_SIZE),
+    A.PadIfNeeded(min_height=IMG_SIZE, min_width=IMG_SIZE, border_mode=0),
+    A.RandomCrop(height=IMG_SIZE, width=IMG_SIZE, p=0.5),
+    A.HorizontalFlip(p=0.5),
+    A.ShiftScaleRotate(
+        shift_limit=0.05,
+        scale_limit=0.1,
+        rotate_limit=15,
+        border_mode=0,
+        p=0.5,
+    ),
+    A.ColorJitter(
+        brightness=0.2,
+        contrast=0.2,
+        saturation=0.2,
+        hue=0.02,
+        p=0.5,
+    ),
+    A.Normalize(
+        mean=(0.485, 0.456, 0.406),
+        std=(0.229, 0.224, 0.225),
+    ),
+    ToTensorV2(),
+])
+
+val_transforms = A.Compose([
+    A.LongestMaxSize(max_size=IMG_SIZE),
+    A.PadIfNeeded(min_height=IMG_SIZE, min_width=IMG_SIZE, border_mode=0),
+    A.CenterCrop(height=IMG_SIZE, width=IMG_SIZE),
+    A.Normalize(
+        mean=(0.485, 0.456, 0.406),
+        std=(0.229, 0.224, 0.225),
+    ),
+    ToTensorV2(),
+])
