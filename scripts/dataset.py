@@ -1,12 +1,9 @@
-# from functools import partial
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 from PIL import Image
-import timm
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-from transformers import AutoTokenizer, BertTokenizerFast
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import cv2
@@ -38,6 +35,7 @@ class MultimodalDataset(Dataset):
         if self.transforms is not None:
             image = self.transforms(image=np.array(image))["image"]
         return {
+            "dish_id": row["dish_id"],
             "total_mass": total_mass,
             "total_calories": total_calories,
             "ingredients": ingredients,
@@ -49,6 +47,7 @@ def collate_fn(batch, tokenizer):
     ingredients = ["; ".join(item["ingredients"]) for item in batch]
     images = torch.stack([item["image"] for item in batch])
     total_calories = torch.tensor([item["total_calories"] for item in batch], dtype=torch.float32)
+    dish_ids = [item["dish_id"] for item in batch]
 
     tokenized = tokenizer(
         ingredients,
@@ -59,6 +58,7 @@ def collate_fn(batch, tokenizer):
     )
 
     return {
+        "dish_id": dish_ids,
         "total_mass": total_mass,
         "total_calories": total_calories,
         "image": images,
@@ -66,14 +66,18 @@ def collate_fn(batch, tokenizer):
         "attention_mask": tokenized["attention_mask"]
     }
 
-def draw_item(item):
+def draw_item(item, idx=None, mae=None):
     lines  = [
         f"Вес: {item["total_mass"]} g",
-        f"Калорийность: {item["total_calories"]} kcal",
+        f"Калорийность: {item["total_calories"]:.0f} kcal",
         "",
         "Ингредиенты:",
         *[f"- {ing}" for ing in item["ingredients"]],
+        ""
     ]
+    if idx is not None and mae is not None:
+        lines.append(f"Номер: {idx}")
+        lines.append(f"MAE: {mae}")
     text = "\n".join(lines)
     _, (ax_img, ax_txt) = plt.subplots(1, 2, figsize=(10, 5))
 
@@ -135,3 +139,10 @@ val_transforms = A.Compose([
     ),
     ToTensorV2(),
 ])
+
+def get_by_dish_id(dataset, dish_id):
+    df = dataset.dish
+    row_idx = df.index[df["dish_id"] == dish_id]
+    idx = int(row_idx[0])
+    sample = dataset[idx]
+    return idx, sample

@@ -1,5 +1,5 @@
 
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoModel
 import torch
 import torch.nn as nn
 import timm
@@ -85,13 +85,13 @@ class MultimodalCalorieRegressor(nn.Module):
 
         return calories_pred
 
-def evaluate(model, val_loader, epoch, device):
+def evaluate(model, val_loader, epoch, device, collect_errors=False):
     model.eval()
     total_abs_err = 0.0
     n = 0
-    
+    errors_info = [] if collect_errors else None
     val_bar = tqdm(val_loader, desc=f"Валидация эпоха {epoch}")
-
+   
     with torch.no_grad():
         for batch in val_bar:
             for k, v in batch.items():
@@ -103,7 +103,20 @@ def evaluate(model, val_loader, epoch, device):
             total_abs_err += err.sum().item()
             n += cal_target.size(0)
 
+            if collect_errors:
+                dish_ids = batch["dish_id"]
+                if torch.is_tensor(dish_ids):
+                    dish_ids = dish_ids.cpu().tolist()
+                for e, dish_id in zip(err.cpu().tolist(), dish_ids):
+                    errors_info.append({
+                        "dish_id": dish_id,
+                        "error": float(e),
+                    })
+
     mae = total_abs_err / n
+    if collect_errors:
+        errors_info_sorted = sorted(errors_info, key=lambda x: x["error"], reverse=True)
+        return mae, errors_info_sorted
     return mae
 
 def train_model(model, train_loader, val_loader, device, config):

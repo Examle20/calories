@@ -1,5 +1,3 @@
-import torch
-
 class Config:
     TEXT_MODEL_NAME = "bert-base-uncased"
     IMAGE_MODEL_NAME = "resnet50"
